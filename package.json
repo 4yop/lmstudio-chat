@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "@lmstudio/sdk": "^1.5.0",
     "4yop-util": "git+https://gitee.com/Reusify/node-util",
     "cors": "^2.8.5",
     "express": "^5.2.1",
