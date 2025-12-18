@@ -10,3 +10,6 @@ npm run init:db
 
 #启动   
 npm run start    
+
+#访问
+http://127.0.0.1:3000
