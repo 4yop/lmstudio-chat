@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "@lmstudio/sdk": "^1.5.0",
+    "4yop-util": "git+https://gitee.com/Reusify/node-util",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "express-session": "^1.18.2",
+    "http-proxy-middleware": "^3.0.5",
+    "sequelize": "^6.37.7",
+    "session-file-store": "^1.5.0",
+    "sqlite-helper": "git+https://gitee.com/Reusify/node-sqlite-helper#v1.0.0"
+  },
+  "type": "module",
+  "imports": {
+    "#src/*": "./src/*.js"
+  },
+  "name": "lm-studio-chat",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "init:db": "node init.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
