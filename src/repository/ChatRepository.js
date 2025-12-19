@@ -22,7 +22,7 @@ class ChatRepository
             const systemMessageData = {
                 role: 'system',
                 content: system_msg,
-                conversation_id: conversation_id,
+                conversation_id: currentConversation.id,
             };
             const systemMessage = await MessageDto.createOne(systemMessageData);
             if (!systemMessage) {

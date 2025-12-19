@@ -54,6 +54,7 @@ export default class MessageService
 
         const prediction = aiModel.respond(chat,{
             signal: abortController.signal,
+            maxTokens: 500,
         });
 
         const aiMessageData = {
