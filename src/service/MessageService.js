@@ -4,6 +4,7 @@ import config from "#src/config/lm-studio-server"
 import ConversationDto from "#src/dao/ConversationDao";
 import {Chat} from "@lmstudio/sdk";
 import {getModel} from "#src/lib/ai-client";
+import ChatRepository from "#src/repository/ChatRepository";
 
 
 export default class MessageService
@@ -14,18 +15,16 @@ export default class MessageService
 
     #currentConversation;//当前对话
 
-    #aiResponse = null;
+
 
     #fullAiResponseContent = '';//用于累计AI的完整回复内容
 
-    #isThinking = false;// 标记是否正在输出思考过程
 
-    #abortController = null;
 
     constructor({user_id,conversation_id = 0,content})
     {
         this.#user_id = user_id;
-        this.#conversation_id = conversation_id;
+        this.#conversation_id = parseInt(conversation_id);
         this.#content = content;
     }
 
@@ -33,24 +32,14 @@ export default class MessageService
     async send(abortController,sendChunk)
     {
 
-        this.#currentConversation = await ConversationService.createOrFindUserConversation({
+        const {currentConversation} = await ChatRepository.initializeConversationContext({
             user_id: this.#user_id,
             conversation_id: this.#conversation_id,
-            title: this.#content.substring(0, 20) || '新对话',
-        });
-
-        this.#conversation_id = this.#currentConversation.id;
-
-        // 2. 保存用户消息 (Role: user)
-        const userMessageData = {
-            role: 'user',
             content: this.#content,
-            conversation_id: this.#conversation_id,
-        };
-        const userMessage = await MessageDto.createOne(userMessageData);
-        if (!userMessage) {
-            throw new Error('Failed to save user message.');
-        }
+        });
+        this.#currentConversation = currentConversation;
+        this.#conversation_id = currentConversation.id
+
 
         const historyMessages = await MessageDto.getListByConversationId(this.#conversation_id);
 
@@ -61,10 +50,7 @@ export default class MessageService
         }));
 
         const chat = Chat.from(messagesForAI);
-
-
         const aiModel = await getModel();
-
 
         const prediction = aiModel.respond(chat,{
             signal: abortController.signal,
@@ -78,8 +64,6 @@ export default class MessageService
         const aiMessage = await MessageDto.createOne(aiMessageData);
         for await (const item of prediction)
         {
-
-
             if (item.reasoningType === 'reasoningStartTag') {
                 this.#fullAiResponseContent += '<think>'
                 sendChunk('<think>',this.#conversation_id);
@@ -89,10 +73,10 @@ export default class MessageService
                 this.#fullAiResponseContent += '</think>'
                 sendChunk('</think>',this.#conversation_id);
             }
-
             sendChunk(item.content,this.#conversation_id);
 
             //process.stdout.write(item.content);
+            //todo 优化为比上次多 x个字符才保持
             await MessageDto.updateContent(aiMessage.id, this.#fullAiResponseContent);
         }
         await MessageDto.updateContent(aiMessage.id, this.#fullAiResponseContent);
@@ -103,7 +87,7 @@ export default class MessageService
     }
 
 
-
+    //todo 待完善
     async generateTitle() {
         console.log(`[Auto-Title] Starting for conversation ${this.#conversation_id}...`);
 

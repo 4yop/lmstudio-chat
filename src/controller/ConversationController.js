@@ -7,6 +7,7 @@ import { Op } from 'sequelize';
 import ConversationDto from "#src/dao/ConversationDao";
 
 class ConversationController {
+
     /**
      * @route GET /conversations
      * @description 获取当前用户的会话列表，支持倒序分页。
@@ -20,7 +21,7 @@ class ConversationController {
         const { last_id } = req.query; // 获取请求参数中的最小ID
 
         try {
-
+            //todo 改为安上次使用时间来排！
             const list = await ConversationDto.getList({
                 user_id,
                 last_id: parseInt(last_id),

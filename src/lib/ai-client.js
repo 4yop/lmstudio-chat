@@ -28,9 +28,7 @@ export async function getModel() {
         } else {
             // 3. 内存中没有，则执行加载
             console.log(`[AI] 正在加载新模型: ${Config.model_id} ...`);
-            cachedModelInstance = await lmstudioClient.llm.load(Config.model_id, {
-                verbose: true
-            });
+            cachedModelInstance = await lmstudioClient.llm.load(Config.model_id);
         }
 
         return cachedModelInstance;
