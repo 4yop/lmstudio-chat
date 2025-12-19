@@ -816,6 +816,11 @@
                         try {
                             const json = JSON.parse(line);
 
+                            if (json.conversationId)
+                            {
+                                currentConversationId = json.conversationId;
+                            }
+
                             if (json.type === 'stream') {
                                 // 累积 AI 文本
                                 raw += json.content || '';

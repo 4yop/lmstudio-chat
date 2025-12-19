@@ -2,6 +2,8 @@ import ConversationService from "#src/service/ConversationService";
 import MessageDto from "#src/dao/MessageDao";
 import config from "#src/config/lm-studio-server"
 import ConversationDto from "#src/dao/ConversationDao";
+import {Chat} from "@lmstudio/sdk";
+import {getModel} from "#src/lib/ai-client";
 
 
 export default class MessageService
@@ -28,9 +30,9 @@ export default class MessageService
     }
 
 
-    async send(abortController)
+    async send(abortController,sendChunk)
     {
-        this.#abortController = abortController;
+
         this.#currentConversation = await ConversationService.createOrFindUserConversation({
             user_id: this.#user_id,
             conversation_id: this.#conversation_id,
@@ -57,55 +59,16 @@ export default class MessageService
             role: msg.role,
             content: msg.content
         }));
-        // 5. 调用 AI (Fetch API) 并进行流式响应
-        this.#aiResponse = await fetch(config.api_url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: config.model_id,
-                messages: messagesForAI,
-                stream: true,
-                temperature: 0.7
-            }),
-            signal: this.#abortController.signal // 绑定 abort signal
+
+        const chat = Chat.from(messagesForAI);
+
+
+        const aiModel = await getModel();
+
+
+        const prediction = aiModel.respond(chat,{
+            signal: abortController.signal,
         });
-
-        if (!this.#aiResponse.ok) {
-            throw new Error(`AI API failed with status ${this.#aiResponse.status}: ${await this.#aiResponse.text()}`);
-        }
-        return this.#aiResponse;
-    }
-
-    processLine (line)  {
-        line = line.trim();
-        if (!line.startsWith("data: ")) return null;
-        const dataStr = line.substring(6).trim();
-        if (dataStr === "[DONE]") return null;
-
-        try {
-            const json = JSON.parse(dataStr);
-            const delta = json.choices?.[0]?.delta || {};
-            const content = delta.content || "";
-            const reasoning = delta.reasoning_content || delta.reasoning || ""; // 兼容不同字段名
-            return { content, reasoning };
-        } catch (e) {
-            console.warn("Error parsing JSON:", e);
-            return null;
-        }
-    };
-
-    async receive(callback)
-    {
-        console.log('receive');
-        let callbacks = (textChunk)=> {
-            callback(textChunk);
-            if (textChunk) {
-                console.log(textChunk)
-                this.#fullAiResponseContent += textChunk;
-            }
-        };
 
         const aiMessageData = {
             role: 'assistant',
@@ -113,75 +76,32 @@ export default class MessageService
             conversation_id: this.#conversation_id,
         };
         const aiMessage = await MessageDto.createOne(aiMessageData);
-
-        const stream = this.#aiResponse.body;
-        if (!stream || !stream[Symbol.asyncIterator])
+        for await (const item of prediction)
         {
-            throw new Error("Stream is not iterable in this environment.");
-        }
-        let lastSavedLength = 0;
-        const SAVE_INTERVAL_CHARS = 10; // 每收到一定字符就保存一次数据库
-        const decoder = new TextDecoder("utf-8");
 
-        let buffer = "";
-        try {
-            for await (const chunk of stream) {
-                // 如果已经被 abort，退出循环
-                if (this.#abortController.signal.aborted) break;
 
-                const decodedChunk = decoder.decode(chunk, { stream: true });
-                buffer += decodedChunk;
-
-                const lines = buffer.split("\n");
-                buffer = lines.pop(); // 保留最后如果不完整的行
-
-                for (const line of lines) {
-                    const result = this.processLine(line);
-                    if (result) {
-                        const { content, reasoning } = result;
-
-                        // 思考标签逻辑
-                        if (reasoning) {
-                            if (!this.#isThinking) {
-                                callbacks('<think>');
-                                this.#isThinking = true;
-                            }
-                            callbacks(reasoning);
-                        }
-
-                        if (content) {
-                            if (this.#isThinking) {
-                                callbacks('</think>');
-                                this.#isThinking = false;
-                            }
-                            callbacks(content);
-                        }
-                    }
-                }
-
-                // 增量保存逻辑：每隔一段长度更新一次数据库
-                if (this.#fullAiResponseContent.length - lastSavedLength >= SAVE_INTERVAL_CHARS) {
-                    await MessageDto.updateContent(aiMessage.id, this.#fullAiResponseContent);
-                    lastSavedLength = this.#fullAiResponseContent.length;
-                }
+            if (item.reasoningType === 'reasoningStartTag') {
+                this.#fullAiResponseContent += '<think>'
+                sendChunk('<think>',this.#conversation_id);
             }
-        } catch (err) {
-            if (err.name === 'AbortError') {
-                console.log('Upstream AI request aborted.');
-            } else {
-                throw err;
+            this.#fullAiResponseContent += item.content;
+            if (item.reasoningType === 'reasoningEndTag') {
+                this.#fullAiResponseContent += '</think>'
+                sendChunk('</think>',this.#conversation_id);
             }
-        } // try catch
-        if (!this.#isThinking) {
-            callbacks('</think>');
+
+            sendChunk(item.content,this.#conversation_id);
+
+            //process.stdout.write(item.content);
+            await MessageDto.updateContent(aiMessage.id, this.#fullAiResponseContent);
         }
         await MessageDto.updateContent(aiMessage.id, this.#fullAiResponseContent);
-
         return {
-            message_id : aiMessage.id,
             conversation_id : this.#conversation_id,
-        }
-    } //for stream
+            message_id : aiMessage.id,
+        };
+    }
+
 
 
     async generateTitle() {

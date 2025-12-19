@@ -36,75 +36,67 @@ class MessageController {
      * @bodyParam {number} [conversation_id] - 可选的会话ID
      */
     async send(req, res) {
-        try {
-            // 确保用户已登录 (假设 req.session.user_id 已被中间件强制设置为 1)
-            const user_id = req.session.user_id;
+        // 1. 立即创建控制器并监听断开
+        const abortController = new AbortController();
 
-            // 假设数据来自 req.body (通常是 POST 请求的标准做法)
-            const { content, conversation_id: conversation_id } = req.body;
-
-            if (!content) {
-                return res.json(fail('消息为空'));
+        // 监听 res 的 close 事件比 req 更可靠
+        res.on('close', () => {
+            if (!abortController.signal.aborted) {
+                console.log('--- 🚀 客户端已断开，立即中止 AI 任务 ---');
+                abortController.abort();
             }
+        });
+        try {
+            const user_id = req.session.user_id;
+            const { content, conversation_id } = req.body;
 
-            // 创建 AbortController 用于控制上游 AI 请求
-            const abortController = new AbortController();
+            if (!content) return res.json(fail('消息为空'));
 
-            // 监听客户端连接断开事件 (req 'close')
-            // 当用户点击停止或关闭页面时触发
-            req.on('close', () => {
-                if (!res.writableEnded) {
-                    console.log('Client closed connection. Aborting AI request...');
-                    abortController.abort();
-                }
-            });
-
-
-            const messageService = new MessageService({
-                user_id,content,conversation_id:conversation_id
-            });
-            await messageService.send(abortController);
+            // 2. 尽早发出响应头
             res.writeHead(200, {
-                'Content-Type': 'application/json', // 或者使用 'text/event-stream' (SSE)
-                'Transfer-Encoding': 'chunked',
+                 'Content-Type': 'application/json',
+                 'Transfer-Encoding': 'chunked',
+
+
+                // 'Content-Type': 'text/event-stream',
+                // 'Cache-Control': 'no-cache',
+                // 'Connection': 'keep-alive',
+                // 'X-Accel-Buffering': 'no' // 禁用 Nginx 缓存，关键！
             });
 
-            const sendChunk = (textChunk) => {
-                if (textChunk) {
-                    try {
-                        // 增加 try-catch 即使客户端断开链接，也不影响后端继续接收流并保存
-                        if (!res.writableEnded) {
-                            res.write(JSON.stringify({ type: 'stream', content: textChunk }));
-                        }
-                    } catch (e) {
-                        // 客户端断开，忽略错误
-                    }
-
+            const sendChunk = (textChunk,conversationId) => {
+                if (res.writableEnded) {
+                    return;
+                }
+                if (textChunk)
+                {
+                    // 标准 SSE 格式
+                    res.write(JSON.stringify({ type: 'stream', content: textChunk,conversationId : conversationId }));
                 }
             };
 
-            const result = await messageService.receive(sendChunk)
+            const messageService = new MessageService({ user_id, content, conversation_id });
 
-            try {
-                if (!res.writableEnded) {
-                    res.write(JSON.stringify({
-                        type: 'end',
-                        conversationId: result.conversation_id,
-                        messageId: result.message_id
-                    }));
-                    res.end();
-                }
-            } catch (e) {
-                // ignore
+            // 3. 执行 AI 发送逻辑
+            const result = await messageService.send(abortController, sendChunk);
+
+            // 4. 发送结束标记
+            if (!res.writableEnded) {
+                res.write(`${JSON.stringify({
+                    type: 'end',
+                    conversationId: result.conversation_id,
+                    messageId: result.message_id
+                })}`);
+                res.end();
             }
 
-            const msgCount = await MessageDto.countByConversationId(result.conversation_id);
-            if (msgCount <= 2) {
-                messageService.generateTitle().catch(err => {
-                    console.error("Auto-Title generation failed:", err);
-                });
-
-            }
+            // const msgCount = await MessageDto.countByConversationId(result.conversation_id);
+            // if (msgCount <= 2) {
+            //     messageService.generateTitle().catch(err => {
+            //         console.error("Auto-Title generation failed:", err);
+            //     });
+            //
+            // }
 
         } catch (error) {
             // 如果是 abort 导致的 fetch error，可以忽略或记录

@@ -12,7 +12,7 @@ const router = express.Router();
 // 参数 ：content:用户发的内容，conversation_id:会话id
 // sse 结果的
 // sse 结果的
-router.post('/message/send', (req, res) => TestController.send(req, res));
+router.post('/message/send', (req, res) => MessageController.send(req, res));
 
 
 // 参数：conversation_id:会话id
